@@ -7,10 +7,10 @@ from PIL import Image
 from docarray import Document
 from requests_oauthlib import OAuth1Session
 
-API_KEY = "LStTqgtSARD1ecpi2O4E2Iwcb"
-API_SECRET = "KJbmZiBL4tMJA8EQJ2qFehwX6th9hX5tJM5urdRn5z0XLEOkMn"
-CONSUMER_KEY = "1545506567465930752-5KCiFpUHfhfGg5CUQOTVjj1J8lZdYs"
-CONSUMER_SECRET = "Ym7KQiKFt6dkkWd7UCHagxCtvnx8QKdz4LI2HL1KcFsjf"
+API_KEY = ""
+API_SECRET = ""
+CONSUMER_KEY = ""
+CONSUMER_SECRET = ""
 
 DALLE_SERVER_URL = 'grpcs://dalle-flow.dev.jina.ai'
 NUM_IMAGES = 2  # you get back 2 times this number
