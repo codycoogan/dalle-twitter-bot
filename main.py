@@ -1,90 +1,112 @@
-import base64
-import io
 import json
-import os.path
+import random
 
-from PIL import Image
-from docarray import Document
+import openai
 from requests_oauthlib import OAuth1Session
 
-API_KEY = "LStTqgtSARD1ecpi2O4E2Iwcb"
-API_SECRET = "KJbmZiBL4tMJA8EQJ2qFehwX6th9hX5tJM5urdRn5z0XLEOkMn"
-CONSUMER_KEY = "1545506567465930752-5KCiFpUHfhfGg5CUQOTVjj1J8lZdYs"
-CONSUMER_SECRET = "Ym7KQiKFt6dkkWd7UCHagxCtvnx8QKdz4LI2HL1KcFsjf"
+from word_data import WordData
 
-DALLE_SERVER_URL = 'grpcs://dalle-flow.dev.jina.ai'
 NUM_IMAGES = 2  # you get back 2 times this number
-DALLE_IMAGES_PATH = '/Users/codycoogan/Documents/dalle_images/'
 
 
 def main():
-    get_and_save_images()
-    media_ids = []
-    # for each image, encode it and upload to twitter to get media_id
-    for i in range(NUM_IMAGES * 2):
-        img_path = os.path.join(DALLE_IMAGES_PATH, "image{}.png".format(i))
-        with open(img_path, "rb") as image_file:
-            encoded_string = base64.b64encode(image_file.read())
-            media_ids.append(upload_image_twitter(encoded_string))
-
-    # Send tweet
-    create_tweet(media_ids)
+    with open("credentials.json", "r") as credentials_file:
+        credentials_dict = json.load(credentials_file)
+    guess_dalle = GuessDalle(credentials_dict)
+    guess_dalle.execute()
 
 
-def get_and_save_images():
-    prompt = 'a goat watching tv'
-    print("Generating image for prompt: {}".format(prompt))
-    # Generate images and save as gif
-    da = Document(text=prompt).post(DALLE_SERVER_URL, parameters={'num_images': NUM_IMAGES}).matches
-    # da.plot_image_sprites(fig_size=(10, 10), show_index=True)
-    save_gif_path = os.path.join(DALLE_IMAGES_PATH, "image_gen.gif")
-    da.save_gif(save_gif_path)
+class GuessDalle:
 
-    # Save individual pics from gif
-    with Image.open(save_gif_path) as im:
-        for i in range(NUM_IMAGES*2):
-            im.seek(im.n_frames // (NUM_IMAGES * 2) * i)
-            im_save_path = os.path.join(DALLE_IMAGES_PATH, 'image{}.png'.format(i))
-            im.save(im_save_path)
+    def __init__(self, credentials_dict):
+        # OpenAI
+        self.OPENAI_API_KEY = credentials_dict['OPENAI_API_KEY']
+        # Twitter
+        self.API_KEY = credentials_dict['API_KEY']
+        self.API_SECRET = credentials_dict['API_SECRET']
+        self.CONSUMER_KEY = credentials_dict['CONSUMER_KEY']
+        self.CONSUMER_SECRET = credentials_dict['CONSUMER_SECRET']
 
+    def execute(self):
+        # Get noun and adjective
+        adj, noun = self.get_word_pair()
+        prompt = "{} {}".format(adj, noun)
+        base64_encodings = self.get_openai_image(prompt)
+        media_ids = []
+        for encoding in base64_encodings:
+            media_id = self.upload_image_twitter(encoding)
+            media_ids.append(media_id)
+        self.create_tweet(media_ids, prompt)
 
-def upload_image_twitter(encoded_image):
-    twitter_session = get_twitter_session()
-    url = 'https://upload.twitter.com/1.1/media/upload.json'
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    data = {"media_data": encoded_image}
-    response = twitter_session.post(url, data=data, headers=headers)
-    data = response.json()
-    if not response.ok:
-        print("Unable to get image Id: {}".format(data['errors']))
-        return False
-    return data['media_id_string']
+    def get_word_pair(self):
+        """
+        Gets adjective noun word pair
+        :return:
+        """
+        adjs = WordData.adjs['adjs']
+        nouns = WordData.nouns['nouns']
+        rand_one = random.randrange(start=0, stop=len(adjs) - 1)
+        rand_two = random.randrange(start=0, stop=len(nouns) - 1)
+        return adjs[rand_one], nouns[rand_two]
 
+    def upload_image_twitter(self, encoded_image):
+        twitter_session = self.get_twitter_session()
+        url = 'https://upload.twitter.com/1.1/media/upload.json'
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        data = {"media_data": encoded_image}
+        response = twitter_session.post(url, data=data, headers=headers)
+        data = response.json()
+        if not response.ok:
+            print("Unable to get image Id: {}".format(data['errors']))
+            return False
+        return data['media_id_string']
 
-def create_tweet(media_ids):
-    twitter = get_twitter_session()
-    url = 'https://api.twitter.com/2/tweets'
-    headers = {"Content-Type": "application/json"}
-    data = json.dumps({
-        "text": "Can you guess the prompt for these Dall-E computer generated images? It's 4 words. #dalle",
-        "media": {
-            "media_ids": media_ids
-        }
-    })
-    response = twitter.post(url, data=data, headers=headers)
-    # print(r)
-    data = response.json()
-    if not response.ok:
-        print("Unable to create tweet: {}".format(data['errors']))
-    else:
-        print("Tweet sent successfully!")
+    def create_tweet(self, media_ids, prompt):
+        twitter = self.get_twitter_session()
+        url = 'https://api.twitter.com/2/tweets'
+        headers = {"Content-Type": "application/json"}
+        data = json.dumps({
+            "text": "What two word prompt generated these Dall-E computer images?? #dalle #GuessThePrompt",
+            "media": {
+                "media_ids": media_ids
+            }
+        })
+        response = twitter.post(url, data=data, headers=headers)
+        data = response.json()
+        if not response.ok:
+            print("Unable to create tweet: {}".format(data.get('errors')))
+        else:
+            print("Tweet sent successfully!")
+            twitter_id = data.get('data').get('id')
+            # Reply to tweet
+            reply_data = json.dumps({
+                "text": "Prompt:\n\n\n {}".format(prompt),
+                "reply": {
+                    "in_reply_to_tweet_id": twitter_id
+                }
+            })
+            response = twitter.post(url, data=reply_data, headers=headers)
+            data = response.json()
+            if not response.ok:
+                print("Unable to reply to tweet: {}".format(data.get('errors')))
 
+    def get_openai_image(self, prompt):
+        openai.api_key = self.OPENAI_API_KEY
+        response = openai.Image.create(
+            prompt=prompt,
+            n=4,
+            size="1024x1024",
+            response_format="b64_json"
 
-def get_twitter_session():
-    return OAuth1Session(API_KEY,
-                         client_secret=API_SECRET,
-                         resource_owner_key=CONSUMER_KEY,
-                         resource_owner_secret=CONSUMER_SECRET)
+        )
+        base64_encodings = [x['b64_json'] for x in response['data']]
+        return base64_encodings
+
+    def get_twitter_session(self):
+        return OAuth1Session(self.API_KEY,
+                             client_secret=self.API_SECRET,
+                             resource_owner_key=self.CONSUMER_KEY,
+                             resource_owner_secret=self.CONSUMER_SECRET)
 
 
 if __name__ == '__main__':
